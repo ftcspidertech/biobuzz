@@ -1,5 +1,7 @@
 package org.firstinspires.ftc.teamcode.biobuzz.navigation;
 
+import com.arcrobotics.ftclib.controller.PIDController;
+import com.arcrobotics.ftclib.geometry.Pose2d;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
@@ -10,17 +12,16 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
-import org.firstinspires.ftc.teamcode.biobuzz.navigation.NavigationType;
-import org.firstinspires.ftc.teamcode.biobuzz.navigation.TurnMethod;
 
 import java.util.concurrent.TimeUnit;
 
 public class MecanumRobotController {
     // Motors
-    private DcMotor frontLeftMotor = null;
-    private DcMotor backRightMotor = null;
-    private DcMotor frontRightMotor = null;
-    private DcMotor backLeftMotor = null;
+    public DcMotor frontLeftMotor = null;
+    public DcMotor backRightMotor = null;
+    public DcMotor frontRightMotor = null;
+    public DcMotor backLeftMotor = null;
+    public IMU imu = null;
 
     private double frontLeftMotorTicksPerRotation;
     private double backLeftMotorTicksPerRotation;
@@ -34,7 +35,6 @@ public class MecanumRobotController {
 
     private static final double WHEEL_DIAMETER_INCH = 4.09449;//2.95276;
     private static final double WHEEL_DIAMETER_MM = 104;//75;
-    private IMU imu;
     private Telemetry telemetry;
     private boolean robotMoving = false;
     public double leftCalibrationFactor = 1.0;
@@ -49,6 +49,8 @@ public class MecanumRobotController {
     public int timeout = 5000;
     public double tickTolerance = 3; // tick percentage
     private double a, b=10.0, c;
+
+    private double robotX=0, robotY=0, robotTheta=0;
 
     public MecanumRobotController(HardwareMap hardwareMap, Telemetry tmetry) {
         initRobotController(hardwareMap,tmetry);
@@ -94,13 +96,13 @@ public class MecanumRobotController {
         backLeftMotorTicksPerRotation = backRightMotor.getMotorType().getTicksPerRev();
         frontRightMotorTicksPerRotation = frontRightMotor.getMotorType().getTicksPerRev();
         backRightMotorTicksPerRotation = backLeftMotor.getMotorType().getTicksPerRev();
-        //telemetry.addData("Front left motor ticks per rotation = ",frontLeftMotorTicksPerRotation);
+//        telemetry.addData("Front left motor ticks per rotation = ",frontLeftMotorTicksPerRotation);
 
         frontLeftMotorTicksPerInch = frontLeftMotorTicksPerRotation/(WHEEL_DIAMETER_INCH*Math.PI);
         backLeftMotorTicksPerInch = backLeftMotorTicksPerRotation/(WHEEL_DIAMETER_INCH*Math.PI);
         frontRightMotorTicksPerInch = frontRightMotorTicksPerRotation/(WHEEL_DIAMETER_INCH*Math.PI);
         backRightMotorTicksPerInch = backRightMotorTicksPerRotation/(WHEEL_DIAMETER_INCH*Math.PI);
-        //telemetry.addData("Front left motor ticks per inch = ",frontLeftMotorTicksPerInch);
+//        telemetry.addData("Front left motor ticks per inch = ",frontLeftMotorTicksPerInch);
 
         frontLeftMotorTicksPerMM = frontLeftMotorTicksPerRotation/(WHEEL_DIAMETER_MM*Math.PI);
         backLeftMotorTicksPerMM = backLeftMotorTicksPerRotation/(WHEEL_DIAMETER_MM*Math.PI);
@@ -392,6 +394,11 @@ public class MecanumRobotController {
         c = Math.abs(targetPosition)/2.0;
         int tolerance = Math.max(10,(int)(targetPosition*tickTolerance/100.0));
 
+        // Odometry
+        DrivetrainKinematics kinematics = new DrivetrainKinematics(frontLeftMotor, frontRightMotor,
+                backLeftMotor, backRightMotor, imu, DistanceUnit.INCH); // DrivetrainKinematics resets IMU
+        Pose2d robotPose = kinematics.updateRobotPose();
+
         // Set power and move the robot.
         currSpeed = speed*gbell(0,a,b,c);
         try{
@@ -409,6 +416,7 @@ public class MecanumRobotController {
                     slideLeft(currSpeed);
                 }
                 Thread.sleep(waitTime);
+                robotPose = kinematics.updateRobotPose();
                 currSpeed = speed*gbell(getMeanPosition(),a,b,c);
             }
         } catch (Exception e) {
@@ -420,6 +428,7 @@ public class MecanumRobotController {
 //        oppositePush(currSpeed,navType);
         stop();
 
+        updateRobotPose(robotPose);
     }
 
     private void oppositePush(double speed, NavigationType navType){
@@ -492,6 +501,11 @@ public class MecanumRobotController {
 
         runWithEncoder();
 
+        // Odometry
+        DrivetrainKinematics kinematics = new DrivetrainKinematics(frontLeftMotor, frontRightMotor,
+                backLeftMotor, backRightMotor, imu, DistanceUnit.INCH); // DrivetrainKinematics resets IMU
+        Pose2d robotPose = kinematics.updateRobotPose();
+
         // With Yaw reset, current heading is always close to 0.
         imu.resetYaw();
         currentHeading = getHeading(AngleUnit.DEGREES);
@@ -500,27 +514,34 @@ public class MecanumRobotController {
         // Target heading
         targetHeading = currentHeading + (Math.abs(angle)%divisor);
 
+        a = Math.abs(targetHeading)/2.0;
+        c = Math.abs(targetHeading)/2.0;
+        double currSpeed = speed;//*gbell(0,a,b,c);
+
         robotMoving = true;
         loopExit = false;
         while(!loopExit && currentHeading<targetHeading){
             numCycles = numCycles +1;
-            turnLeft(speed);
+            turnLeft(currSpeed);
             try{
                 Thread.sleep(waitTime);
             }catch(InterruptedException e){
                 telemetry.addData("Error: ", e.getMessage());
             }
+            robotPose = kinematics.updateRobotPose();
             if(numCycles>numCyclesToIgnore){
                 currentHeading = getHeading(AngleUnit.DEGREES);
                 if(currentHeading<-noiseThreshold && currentHeading<initialHeading){
                     currentHeading = divisor + currentHeading;
                 }
             }
+            currSpeed = speed;//*gbell(Math.abs(currentHeading),a,b,c);
         }
         stop();
+        robotMoving = false;
         //telemetry.addData("numCycles",numCycles);
 
-        robotMoving = false;
+        updateRobotPose(robotPose);
     }
 
     public void turnRight(double speed, double angle){
@@ -541,6 +562,11 @@ public class MecanumRobotController {
 
         runWithEncoder();
 
+        // Odometry
+        DrivetrainKinematics kinematics = new DrivetrainKinematics(frontLeftMotor, frontRightMotor,
+                backLeftMotor, backRightMotor, imu, DistanceUnit.INCH); // DrivetrainKinematics resets IMU
+        Pose2d robotPose = kinematics.updateRobotPose();
+
         // With Yaw reset, current heading is always close to 0.
         imu.resetYaw();
         currentHeading = getHeading(AngleUnit.DEGREES);
@@ -548,22 +574,28 @@ public class MecanumRobotController {
 
         targetHeading = currentHeading - (Math.abs(angle)%divisor);
 
+        a = Math.abs(targetHeading)/2.0;
+        c = Math.abs(targetHeading)/2.0;
+        double currSpeed = speed;//*gbell(0,a,b,c);
+
         robotMoving = true;
         loopExit = false;
         while(!loopExit && currentHeading>targetHeading){
             numCycles = numCycles + 1;
-            turnRight(speed);
+            turnRight(currSpeed);
             try{
                 Thread.sleep(waitTime);
             }catch(InterruptedException e){
                 telemetry.addData("Error: ",e.getMessage());
             }
+            robotPose = kinematics.updateRobotPose();
             if(numCycles>numCyclesToIgnore){
                 currentHeading = getHeading(AngleUnit.DEGREES);
                 if(currentHeading>noiseThreshold && currentHeading>initialHeading){
                     currentHeading = currentHeading - divisor;
                 }
             }
+            currSpeed = speed;//*gbell(Math.abs(currentHeading),a,b,c);
             //else{
             //    telemetry.addData("numCycles",numCycles);
             //}
@@ -572,6 +604,8 @@ public class MecanumRobotController {
         //telemetry.addData("numCycles",numCycles);
 
         robotMoving = false;
+
+        updateRobotPose(robotPose);
     }
 
     public void splitStickArcadeDrive(double drive, double strafe, double turn) {
@@ -639,4 +673,217 @@ public class MecanumRobotController {
         return 1.0 / denominator;
     }
 
+    public void slideAndGo(double refDistance, double refTheta, double maxDrivePower){
+        double angle = Math.toRadians(refTheta);
+        double tx = refDistance*Math.cos(angle);
+        double ty = refDistance*Math.sin(angle);
+
+        if(ty<0){
+            slideRight(maxDrivePower,Math.abs(ty));
+        }else{
+            slideLeft(maxDrivePower,Math.abs(ty));
+        }
+        if(tx<0){
+            goBackward(maxDrivePower,Math.abs(tx));
+        }else{
+            goForward(maxDrivePower,Math.abs(tx));
+        }
+    }
+
+    public void goAndSlide(double refDistance, double refTheta, double maxDrivePower){
+        double angle = Math.toRadians(refTheta);
+        double tx = refDistance*Math.cos(angle);
+        double ty = refDistance*Math.sin(angle);
+
+        if(tx<0){
+            goBackward(maxDrivePower,Math.abs(tx));
+        }else{
+            goForward(maxDrivePower,Math.abs(tx));
+        }
+
+        if(ty<0){
+            slideRight(maxDrivePower,Math.abs(ty));
+        }else{
+            slideLeft(maxDrivePower,Math.abs(ty));
+        }
+    }
+
+    public void goToTarget(double refDistance, double refTheta, double maxDrivePower, double maxTurnPower) {
+        if(refTheta>0) {
+            turnLeft(maxTurnPower, refTheta);
+        }else{
+            turnRight(maxTurnPower, refTheta);
+        }
+        goForward(maxDrivePower, refDistance);
+    }
+
+    public void goToTarget(double refDistance, double refTheta, double maxDrivePower){
+        double angle = Math.toRadians(refTheta);
+        double tx = refDistance*Math.cos(angle);
+        double ty = refDistance*Math.sin(angle);
+
+        if(ty<0){
+            slideRight(maxDrivePower,Math.abs(ty));
+        }else{
+            slideLeft(maxDrivePower,Math.abs(ty));
+        }
+        if(tx<0){
+            goBackward(maxDrivePower,Math.abs(tx));
+        }else{
+            goForward(maxDrivePower,Math.abs(tx));
+        }
+    }
+
+    public void goToTarget(double tx, double ty, double theta, double maxDriveSpeed, double maxTurnSpeed){
+        PIDController xController = new PIDController(0.005, 0.0002, 0.0);
+        PIDController yController = new PIDController(0.005, 0.0002, 0.0);
+        PIDController headingController = new PIDController(0.009, 0.0004, 0.0);
+        double POSITION_TOLERANCE = 0.5; // inch
+        double HEADING_TOLERANCE = Math.toRadians(1.5); // rad
+        DrivetrainKinematics kinematics = new DrivetrainKinematics(frontLeftMotor, frontRightMotor,
+                backLeftMotor, backRightMotor, imu, DistanceUnit.INCH); // DrivetrainKinematics resets IMU
+        xController.setSetPoint(tx);
+        yController.setSetPoint(ty);
+        headingController.setSetPoint(0);
+
+        resetAndRunWithEncoder();
+
+        theta = Math.toRadians(theta);
+        Pose2d currentPose = kinematics.updateRobotPose();
+        int count=0, windowSize=3;
+        boolean fullCount = false;
+        double[] buffer = new double[windowSize];
+        double sum, avgSpeed=1.0, stallSpeedThreshold =0.5;
+        int id;
+        double xError=tx-currentPose.getX(), yError=ty-currentPose.getY(), headingError=0.0-currentPose.getHeading();
+        double robotForward, robotStrafe, turnPower;
+
+        for (id=0;id<windowSize;id++){
+            buffer[id] = 0;
+        }
+
+        robotMoving = true;
+        loopExit = false;
+
+        timeoutTimer.reset();
+
+        while(!loopExit && timeoutTimer.milliseconds()<timeout){
+
+            // Exit if the robot is inside the target zone tolerances.  && Math.abs(headingError)<HEADING_TOLERANCE
+            if (Math.abs(xError)<POSITION_TOLERANCE &&
+                    Math.abs(yError)<POSITION_TOLERANCE) {
+//                telemetry.addLine("Exiting loop ...");
+                break;
+            }
+            if(fullCount && avgSpeed<stallSpeedThreshold){
+                break;
+            }
+
+            // Calculate motor power corrections
+            robotForward = xController.calculate(currentPose.getX());
+            robotStrafe  = yController.calculate(currentPose.getY());
+            turnPower = headingController.calculate(headingError);
+
+            // Remove drift components and cap the speeds.
+            double robotHeading = currentPose.getHeading();
+//            robotForward = robotForward*Math.cos(currentPose.getHeading())-robotStrafe*Math.sin(Math.PI/2.0- currentPose.getHeading());
+//            robotForward = robotForward * Math.sin(-robotHeading) + robotStrafe * Math.cos(-robotHeading);
+            robotForward = cap(robotForward, maxDriveSpeed);
+
+//            robotStrafe = robotStrafe*Math.cos(Math.PI/2.0-currentPose.getHeading())-robotForward*Math.sin(currentPose.getHeading());
+//            robotStrafe = robotForward * Math.cos(-robotHeading) - robotStrafe * Math.sin(-robotHeading);
+            robotStrafe  = cap(robotStrafe, maxDriveSpeed);
+
+            turnPower = cap(turnPower, maxTurnSpeed);
+
+            splitStickArcadeDrive(robotForward, -robotStrafe, turnPower);
+
+//            telemetry.addData("robotStrafe", robotStrafe);
+//            telemetry.addData("robotForward", robotForward);
+//            telemetry.addData("turnPower", turnPower);
+//            telemetry.update();
+
+            // Calculate errors
+            currentPose = kinematics.updateRobotPose();
+            xError = tx - currentPose.getX();
+            yError = ty - currentPose.getY();
+            headingError = 0.0-currentPose.getHeading();
+
+            // Normalize the angle so it stays strictly bounded between -PI and +PI
+//            headingError = Math.atan2(Math.sin(headingError), Math.cos(headingError));
+
+            // Calculate average wheel speed (inch/second)
+            count += 1;
+            if(count>windowSize){
+                count = count - windowSize;
+                if(!fullCount){
+                    fullCount = true;
+                }
+            }
+            buffer[count-1] = kinematics.averageWheelSpeed();
+            sum = 0;
+            for (id=0;id<windowSize;id++){
+                sum = sum + buffer[id];
+            }
+            avgSpeed = sum/windowSize;
+
+            telemetry.addData("Average (abs) wheel speed: ", avgSpeed);
+            telemetry.addData("X", currentPose.getX());
+            telemetry.addData("Y", currentPose.getY());
+            telemetry.addData("Heading Error (Deg)", Math.toDegrees(headingError));
+            telemetry.update();
+
+        }
+        stop();
+        robotMoving = false;
+
+        updateRobotPose(currentPose);
+
+//        double x = currentPose.getX();
+//        double y = currentPose.getY();
+//        robotX += x*Math.cos(-robotTheta) - y*Math.sin(-robotTheta);
+//        robotY += x*Math.sin(-robotTheta) - y*Math.cos(-robotTheta);
+//        robotTheta += currentPose.getHeading();
+//        robotTheta = Math.atan2(Math.sin(robotTheta), Math.cos(robotTheta));
+
+        theta = theta - currentPose.getHeading();
+        theta = Math.atan2(Math.sin(theta), Math.cos(theta));
+        if(Math.abs(theta)>HEADING_TOLERANCE) {
+            turnToTarget(Math.toDegrees(theta), maxTurnSpeed);
+        }
+
+        //telemetry.addLine("Done!");
+    }
+
+    private double cap(double x, double limit){
+        return Math.max(-limit, Math.min(x, limit));
+    }
+
+    public void turnToTarget(double theta, double turnPower){
+        if (theta>0){
+            turnLeft(turnPower,theta);
+        }else{
+            turnRight(turnPower,theta);
+        }
+    }
+
+    public void resetOdometry(){
+        robotX = 0;
+        robotY = 0;
+        robotTheta = 0;
+    }
+
+    private void updateRobotPose(Pose2d pose){
+        double x = pose.getX();
+        double y = pose.getY();
+
+        robotX += x*Math.cos(robotTheta) - y*Math.sin(robotTheta);
+        robotY += x*Math.sin(robotTheta) + y*Math.cos(robotTheta);
+        robotTheta += pose.getHeading();
+        robotTheta = Math.atan2(Math.sin(robotTheta), Math.cos(robotTheta));
+    }
+
+    public double[] getRobotPose(){
+        return new double[]{robotX, robotY, robotTheta};
+    }
 }
