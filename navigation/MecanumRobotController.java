@@ -740,7 +740,7 @@ public class MecanumRobotController {
     public void goToTarget(double tx, double ty, double theta, double maxDriveSpeed, double maxTurnSpeed){
         PIDController xController = new PIDController(0.005, 0.0002, 0.0);
         PIDController yController = new PIDController(0.005, 0.0002, 0.0);
-        PIDController headingController = new PIDController(0.05, 0.004, 0.0004);
+        PIDController headingController = new PIDController(0.5, 0.004, 0.0004);
         double POSITION_TOLERANCE = 0.5; // inch
         double HEADING_TOLERANCE = Math.toRadians(1.0); // rad
         DrivetrainKinematics kinematics = new DrivetrainKinematics(frontLeftMotor, frontRightMotor,
@@ -753,10 +753,10 @@ public class MecanumRobotController {
 
         theta = Math.toRadians(theta);
         Pose2d currentPose = kinematics.updateRobotPose();
-        int count=0, windowSize=3;
-        boolean fullCount = false;
+        int windowSize=3;
         double[] buffer = new double[windowSize];
-        double sum, avgSpeed=1.0, stallSpeedThreshold =0.25;
+        double[] movingAvg = {0,0,0}; //{count, fullCount,avgSpeed}
+        double stallSpeedThreshold =0.25;
         int id;
         double xError=tx-currentPose.getX(), yError=ty-currentPose.getY(), headingError=0.0-currentPose.getHeading();
         double robotForward, robotStrafe, turnPower;
@@ -779,7 +779,7 @@ public class MecanumRobotController {
 //                telemetry.addLine("Exiting loop ...");
                 break;
             }
-            if(fullCount && avgSpeed<stallSpeedThreshold){
+            if(movingAvg[1]==1 && movingAvg[2]<stallSpeedThreshold){
                 break;
             }
 
@@ -818,21 +818,22 @@ public class MecanumRobotController {
 //            headingError = Math.atan2(Math.sin(headingError), Math.cos(headingError));
 
             // Calculate average wheel speed (inch/second)
-            count += 1;
-            if(count>windowSize){
-                count = count - windowSize;
-                if(!fullCount){
-                    fullCount = true;
-                }
-            }
-            buffer[count-1] = kinematics.averageWheelSpeed();
-            sum = 0;
-            for (id=0;id<windowSize;id++){
-                sum = sum + buffer[id];
-            }
-            avgSpeed = sum/windowSize;
+            movingAverage(buffer, windowSize, kinematics.averageWheelSpeed(), movingAvg);
+//            count += 1;
+//            if(count>windowSize){
+//                count = count - windowSize;
+//                if(!fullCount){
+//                    fullCount = true;
+//                }
+//            }
+//            buffer[count-1] = kinematics.averageWheelSpeed();
+//            sum = 0;
+//            for (id=0;id<windowSize;id++){
+//                sum = sum + buffer[id];
+//            }
+//            avgSpeed = sum/windowSize;
 
-            telemetry.addData("Average (abs) wheel speed: ", avgSpeed);
+            telemetry.addData("Average (abs) wheel speed: ", movingAvg[2]);
             telemetry.addData("X", currentPose.getX());
             telemetry.addData("Y", currentPose.getY());
             telemetry.addData("Heading Error (Deg)", Math.toDegrees(headingError));
@@ -852,6 +853,30 @@ public class MecanumRobotController {
         theta = Math.atan2(Math.sin(theta), Math.cos(theta));
         theta = Math.toDegrees(theta);
         turnToTarget(theta, maxTurnSpeed);
+    }
+
+    private void movingAverage(double[] buffer, int n, double value, double[] data)
+    {
+        data[0] += 1; // count
+
+        // Wrap around the circular buffer when count exceeds n
+        if (data[0] > n) {
+            data[0] = data[0] - n;
+            if(data[1]==0) {
+                data[1] = 1.0; // full count
+            }
+        }
+
+        buffer[(int)data[0] - 1] = value; // Current average wheel speed
+
+        // Determine how many valid items are actually in the buffer
+        int activeElements = (data[1] == 1.0) ? n : (int)data[0];
+
+        double sum = 0;
+        for (int i = 0; i < activeElements; i++) {
+            sum += buffer[i];
+        }
+        data[2] = sum / activeElements;
     }
 
     private double cap(double x, double limit){
