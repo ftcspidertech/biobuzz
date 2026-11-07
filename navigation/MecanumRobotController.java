@@ -12,6 +12,7 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
+import org.firstinspires.ftc.teamcode.biobuzz.utils.MovingAverage;
 
 import java.util.concurrent.TimeUnit;
 
@@ -51,6 +52,11 @@ public class MecanumRobotController {
     private double a, b=10.0, c;
 
     private double robotX=0, robotY=0, robotTheta=0;
+    private final MovingAverage movingAverage = new MovingAverage(3);
+    private final double accelDelay = 2500; // ms
+    public double xKp = 0.005, yKp=0.005, thKp=0.5;
+    public double xKd = 0.0, yKd=0.0, thKd=0.0004;
+    public double xKi = 0.0002, yKi=0.0002, thKi=0.004;
 
     public MecanumRobotController(HardwareMap hardwareMap, Telemetry tmetry) {
         initRobotController(hardwareMap,tmetry);
@@ -403,6 +409,9 @@ public class MecanumRobotController {
         currSpeed = speed*gbell(0,a,b,c);
         try{
             // Loop until within tolerance
+            movingAverage.reset();
+            double stallSpeedThreshold = 0.25; // inch/second
+            double avgWheelSpeed;
             loopExit = false;
             timeoutTimer.reset();
             while(!loopExit && notWithinTolerance(targetPosition,tolerance) && timeoutTimer.milliseconds()<=timeout){
@@ -417,8 +426,11 @@ public class MecanumRobotController {
                 }
                 Thread.sleep(waitTime);
                 robotPose = kinematics.updateRobotPose();
-//                updateRobotPose(robotPose);
                 currSpeed = speed*gbell(getMeanPosition(),a,b,c);
+                avgWheelSpeed = movingAverage.next(kinematics.averageWheelSpeed());
+                if(timeoutTimer.milliseconds()>accelDelay && movingAverage.isFull() && avgWheelSpeed<stallSpeedThreshold){
+                    break;
+                }
             }
         } catch (Exception e) {
             telemetry.addData("Error: ", e.getMessage());
@@ -521,7 +533,12 @@ public class MecanumRobotController {
 
         robotMoving = true;
         loopExit = false;
-        while(!loopExit && currentHeading<targetHeading){
+        movingAverage.reset();
+        double stallSpeedThreshold = 0.25; // inch/second
+        double avgWheelSpeed;
+        timeoutTimer.reset();
+
+        while(!loopExit && currentHeading<targetHeading && timeoutTimer.milliseconds()<timeout){
             numCycles = numCycles +1;
             turnLeft(currSpeed);
             try{
@@ -531,6 +548,10 @@ public class MecanumRobotController {
             }
             robotPose = kinematics.updateRobotPose();
             currentHeading = Math.toDegrees(robotPose.getHeading());
+            avgWheelSpeed = movingAverage.next(kinematics.averageWheelSpeed());
+            if(timeoutTimer.milliseconds()>accelDelay && movingAverage.isFull() && avgWheelSpeed<stallSpeedThreshold){
+                break;
+            }
 //            if(numCycles>numCyclesToIgnore){
 //                currentHeading = getHeading(AngleUnit.DEGREES);
 //                if(currentHeading<-noiseThreshold && currentHeading<initialHeading){
@@ -582,7 +603,12 @@ public class MecanumRobotController {
 
         robotMoving = true;
         loopExit = false;
-        while(!loopExit && currentHeading>targetHeading){
+        movingAverage.reset();
+        double stallSpeedThreshold = 0.25; // inch/second
+        double avgWheelSpeed;
+        timeoutTimer.reset();
+
+        while(!loopExit && currentHeading>targetHeading && timeoutTimer.milliseconds()<timeout){
             numCycles = numCycles + 1;
             turnRight(currSpeed);
             try{
@@ -592,6 +618,10 @@ public class MecanumRobotController {
             }
             robotPose = kinematics.updateRobotPose();
             currentHeading = Math.toDegrees(robotPose.getHeading());
+            avgWheelSpeed = movingAverage.next(kinematics.averageWheelSpeed());
+            if(timeoutTimer.milliseconds()>accelDelay && movingAverage.isFull() && avgWheelSpeed<stallSpeedThreshold){
+                break;
+            }
 //            if(numCycles>numCyclesToIgnore){
 //                currentHeading = getHeading(AngleUnit.DEGREES);
 //                if(currentHeading>noiseThreshold && currentHeading>initialHeading){
@@ -676,10 +706,10 @@ public class MecanumRobotController {
         return 1.0 / denominator;
     }
 
-    public void slideAndGo(double refDistance, double refTheta, double maxDrivePower){
-        double angle = Math.toRadians(refTheta);
-        double tx = refDistance*Math.cos(angle);
-        double ty = refDistance*Math.sin(angle);
+    public void slideAndGo(double tx, double ty, double maxDrivePower){
+//        double angle = Math.toRadians(refTheta);
+//        double tx = refDistance*Math.cos(angle);
+//        double ty = refDistance*Math.sin(angle);
 
         if(ty<0){
             slideRight(maxDrivePower,Math.abs(ty));
@@ -693,10 +723,10 @@ public class MecanumRobotController {
         }
     }
 
-    public void goAndSlide(double refDistance, double refTheta, double maxDrivePower){
-        double angle = Math.toRadians(refTheta);
-        double tx = refDistance*Math.cos(angle);
-        double ty = refDistance*Math.sin(angle);
+    public void goAndSlide(double tx, double ty, double maxDrivePower){
+//        double angle = Math.toRadians(refTheta);
+//        double tx = refDistance*Math.cos(angle);
+//        double ty = refDistance*Math.sin(angle);
 
         if(tx<0){
             goBackward(maxDrivePower,Math.abs(tx));
@@ -711,36 +741,22 @@ public class MecanumRobotController {
         }
     }
 
-    public void goToTarget(double refDistance, double refTheta, double maxDrivePower, double maxTurnPower) {
-        if(refTheta>0) {
-            turnLeft(maxTurnPower, refTheta);
-        }else{
-            turnRight(maxTurnPower, refTheta);
-        }
-        goForward(maxDrivePower, refDistance);
+    public void goToTarget(double tx, double ty, double maxDrivePower) {
+        goToTarget(tx,ty,0,maxDrivePower,0);
     }
 
-    public void goToTarget(double refDistance, double refTheta, double maxDrivePower){
-        double angle = Math.toRadians(refTheta);
-        double tx = refDistance*Math.cos(angle);
-        double ty = refDistance*Math.sin(angle);
+    public void goToX(double tx, double maxDrivePower) {
+        goToTarget(tx,0,0,maxDrivePower,0);
+    }
 
-        if(ty<0){
-            slideRight(maxDrivePower,Math.abs(ty));
-        }else{
-            slideLeft(maxDrivePower,Math.abs(ty));
-        }
-        if(tx<0){
-            goBackward(maxDrivePower,Math.abs(tx));
-        }else{
-            goForward(maxDrivePower,Math.abs(tx));
-        }
+    public void goToY(double ty, double maxDrivePower) {
+        goToTarget(0,ty,0,maxDrivePower,0);
     }
 
     public void goToTarget(double tx, double ty, double theta, double maxDriveSpeed, double maxTurnSpeed){
-        PIDController xController = new PIDController(0.005, 0.0002, 0.0);
-        PIDController yController = new PIDController(0.005, 0.0002, 0.0);
-        PIDController headingController = new PIDController(0.5, 0.004, 0.0004);
+        PIDController xController = new PIDController(xKp, xKi, xKd);
+        PIDController yController = new PIDController(yKp, yKi, yKd);
+        PIDController headingController = new PIDController(thKp, thKi, thKd);
         double POSITION_TOLERANCE = 0.5; // inch
         double HEADING_TOLERANCE = Math.toRadians(1.0); // rad
         DrivetrainKinematics kinematics = new DrivetrainKinematics(frontLeftMotor, frontRightMotor,
@@ -753,22 +769,14 @@ public class MecanumRobotController {
 
         theta = Math.toRadians(theta);
         Pose2d currentPose = kinematics.updateRobotPose();
-        int windowSize=3;
-        double[] buffer = new double[windowSize];
-        double[] movingAvg = {0,0,0}; //{count, fullCount,avgSpeed}
         double stallSpeedThreshold =0.25;
-        int id;
+        double averageWheelSpeed = stallSpeedThreshold + 1;
         double xError=tx-currentPose.getX(), yError=ty-currentPose.getY(), headingError=0.0-currentPose.getHeading();
         double robotForward, robotStrafe, turnPower;
-//        headingError = Math.atan2(Math.sin(headingError), Math.cos(headingError));
 
-        for (id=0;id<windowSize;id++){
-            buffer[id] = 0;
-        }
-
+        movingAverage.reset();
         robotMoving = true;
         loopExit = false;
-
         timeoutTimer.reset();
 
         while(!loopExit && timeoutTimer.milliseconds()<timeout){
@@ -776,10 +784,11 @@ public class MecanumRobotController {
             // Exit if the robot is inside the target zone tolerances. && Math.abs(headingError)<HEADING_TOLERANCE
             if (Math.abs(xError)<POSITION_TOLERANCE &&
                     Math.abs(yError)<POSITION_TOLERANCE && Math.abs(headingError)<HEADING_TOLERANCE) {
-//                telemetry.addLine("Exiting loop ...");
+                telemetry.addLine("Exiting loop ...");
                 break;
             }
-            if(movingAvg[1]==1 && movingAvg[2]<stallSpeedThreshold){
+            if(timeoutTimer.milliseconds()>accelDelay && movingAverage.isFull() && averageWheelSpeed<stallSpeedThreshold){
+                telemetry.addLine("Less than stall speed ...");
                 break;
             }
 
@@ -789,15 +798,8 @@ public class MecanumRobotController {
             turnPower = headingController.calculate(headingError);
 
             // Remove drift components and cap the speeds.
-            double robotHeading = currentPose.getHeading();
-//            robotForward = robotForward*Math.cos(currentPose.getHeading())-robotStrafe*Math.sin(Math.PI/2.0- currentPose.getHeading());
-//            robotForward = robotForward * Math.sin(-robotHeading) + robotStrafe * Math.cos(-robotHeading);
             robotForward = cap(robotForward, maxDriveSpeed);
-
-//            robotStrafe = robotStrafe*Math.cos(Math.PI/2.0-currentPose.getHeading())-robotForward*Math.sin(currentPose.getHeading());
-//            robotStrafe = robotForward * Math.cos(-robotHeading) - robotStrafe * Math.sin(-robotHeading);
             robotStrafe  = cap(robotStrafe, maxDriveSpeed);
-
             turnPower = cap(turnPower, maxDriveSpeed);
 
             splitStickArcadeDrive(robotForward, -robotStrafe, turnPower);
@@ -809,36 +811,18 @@ public class MecanumRobotController {
 
             // Calculate errors
             currentPose = kinematics.updateRobotPose();
-//            updateRobotPose(currentPose);
             xError = tx - currentPose.getX();
             yError = ty - currentPose.getY();
             headingError = 0.0-currentPose.getHeading();
 
-            // Normalize the angle so it stays strictly bounded between -PI and +PI
-//            headingError = Math.atan2(Math.sin(headingError), Math.cos(headingError));
-
             // Calculate average wheel speed (inch/second)
-            movingAverage(buffer, windowSize, kinematics.averageWheelSpeed(), movingAvg);
-//            count += 1;
-//            if(count>windowSize){
-//                count = count - windowSize;
-//                if(!fullCount){
-//                    fullCount = true;
-//                }
-//            }
-//            buffer[count-1] = kinematics.averageWheelSpeed();
-//            sum = 0;
-//            for (id=0;id<windowSize;id++){
-//                sum = sum + buffer[id];
-//            }
-//            avgSpeed = sum/windowSize;
+            averageWheelSpeed = movingAverage.next(kinematics.averageWheelSpeed());
 
-            telemetry.addData("Average (abs) wheel speed: ", movingAvg[2]);
+            telemetry.addData("Average (abs) wheel speed: ", averageWheelSpeed);
             telemetry.addData("X", currentPose.getX());
             telemetry.addData("Y", currentPose.getY());
             telemetry.addData("Heading Error (Deg)", Math.toDegrees(headingError));
             telemetry.update();
-
         }
         stop();
         robotMoving = false;
@@ -850,35 +834,13 @@ public class MecanumRobotController {
         }
 
         theta = theta - currentPose.getHeading();
-        theta = Math.atan2(Math.sin(theta), Math.cos(theta));
-        theta = Math.toDegrees(theta);
+        theta = Math.toDegrees(normalizeAngle(theta));
         turnToTarget(theta, maxTurnSpeed);
     }
 
-    private void movingAverage(double[] buffer, int n, double value, double[] data)
-    {
-        data[0] += 1; // count
-
-        // Wrap around the circular buffer when count exceeds n
-        if (data[0] > n) {
-            data[0] = data[0] - n;
-            if(data[1]==0) {
-                data[1] = 1.0; // full count
-            }
-        }
-
-        buffer[(int)data[0] - 1] = value; // Current average wheel speed
-
-        // Determine how many valid items are actually in the buffer
-        int activeElements = (data[1] == 1.0) ? n : (int)data[0];
-
-        double sum = 0;
-        for (int i = 0; i < activeElements; i++) {
-            sum += buffer[i];
-        }
-        data[2] = sum / activeElements;
+    private double normalizeAngle(double theta){
+        return Math.atan2(Math.sin(theta), Math.cos(theta));
     }
-
     private double cap(double x, double limit){
         return Math.max(-limit, Math.min(x, limit));
     }
