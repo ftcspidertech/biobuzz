@@ -530,13 +530,13 @@ public class MecanumRobotController {
                 telemetry.addData("Error: ", e.getMessage());
             }
             robotPose = kinematics.updateRobotPose();
-//            updateRobotPose(robotPose);
-            if(numCycles>numCyclesToIgnore){
-                currentHeading = getHeading(AngleUnit.DEGREES);
-                if(currentHeading<-noiseThreshold && currentHeading<initialHeading){
-                    currentHeading = divisor + currentHeading;
-                }
-            }
+            currentHeading = Math.toDegrees(robotPose.getHeading());
+//            if(numCycles>numCyclesToIgnore){
+//                currentHeading = getHeading(AngleUnit.DEGREES);
+//                if(currentHeading<-noiseThreshold && currentHeading<initialHeading){
+//                    currentHeading = divisor + currentHeading;
+//                }
+//            }
             currSpeed = speed*gbell(Math.abs(currentHeading),a,b,c);
         }
         stop();
@@ -591,13 +591,13 @@ public class MecanumRobotController {
                 telemetry.addData("Error: ",e.getMessage());
             }
             robotPose = kinematics.updateRobotPose();
-//            updateRobotPose(robotPose);
-            if(numCycles>numCyclesToIgnore){
-                currentHeading = getHeading(AngleUnit.DEGREES);
-                if(currentHeading>noiseThreshold && currentHeading>initialHeading){
-                    currentHeading = currentHeading - divisor;
-                }
-            }
+            currentHeading = Math.toDegrees(robotPose.getHeading());
+//            if(numCycles>numCyclesToIgnore){
+//                currentHeading = getHeading(AngleUnit.DEGREES);
+//                if(currentHeading>noiseThreshold && currentHeading>initialHeading){
+//                    currentHeading = currentHeading - divisor;
+//                }
+//            }
             currSpeed = speed*gbell(Math.abs(currentHeading),a,b,c);
             //else{
             //    telemetry.addData("numCycles",numCycles);
@@ -740,9 +740,9 @@ public class MecanumRobotController {
     public void goToTarget(double tx, double ty, double theta, double maxDriveSpeed, double maxTurnSpeed){
         PIDController xController = new PIDController(0.005, 0.0002, 0.0);
         PIDController yController = new PIDController(0.005, 0.0002, 0.0);
-        PIDController headingController = new PIDController(0.01, 0.004, 0.0);
+        PIDController headingController = new PIDController(0.05, 0.004, 0.0004);
         double POSITION_TOLERANCE = 0.5; // inch
-        double HEADING_TOLERANCE = Math.toRadians(1.5); // rad
+        double HEADING_TOLERANCE = Math.toRadians(1.0); // rad
         DrivetrainKinematics kinematics = new DrivetrainKinematics(frontLeftMotor, frontRightMotor,
                 backLeftMotor, backRightMotor, imu, DistanceUnit.INCH); // DrivetrainKinematics resets IMU
         xController.setSetPoint(tx);
@@ -756,10 +756,11 @@ public class MecanumRobotController {
         int count=0, windowSize=3;
         boolean fullCount = false;
         double[] buffer = new double[windowSize];
-        double sum, avgSpeed=1.0, stallSpeedThreshold =0.75;
+        double sum, avgSpeed=1.0, stallSpeedThreshold =0.25;
         int id;
         double xError=tx-currentPose.getX(), yError=ty-currentPose.getY(), headingError=0.0-currentPose.getHeading();
         double robotForward, robotStrafe, turnPower;
+//        headingError = Math.atan2(Math.sin(headingError), Math.cos(headingError));
 
         for (id=0;id<windowSize;id++){
             buffer[id] = 0;
@@ -772,9 +773,9 @@ public class MecanumRobotController {
 
         while(!loopExit && timeoutTimer.milliseconds()<timeout){
 
-            // Exit if the robot is inside the target zone tolerances.  && Math.abs(headingError)<HEADING_TOLERANCE
+            // Exit if the robot is inside the target zone tolerances. && Math.abs(headingError)<HEADING_TOLERANCE
             if (Math.abs(xError)<POSITION_TOLERANCE &&
-                    Math.abs(yError)<POSITION_TOLERANCE) {
+                    Math.abs(yError)<POSITION_TOLERANCE && Math.abs(headingError)<HEADING_TOLERANCE) {
 //                telemetry.addLine("Exiting loop ...");
                 break;
             }
@@ -843,26 +844,14 @@ public class MecanumRobotController {
 
         updateRobotPose(currentPose);
 
-        double k = 1.0;
-        theta = theta - k*currentPose.getHeading();
-        theta = Math.atan2(Math.sin(theta), Math.cos(theta));
-        if(Math.abs(theta)>HEADING_TOLERANCE) {
-            theta = Math.toDegrees(theta);
-//            telemetry.addData("Turn: ", theta);
-//            telemetry.update();
-//            try {
-//                Thread.sleep(3000);
-//            } catch (InterruptedException e) {
-//                throw new RuntimeException(e);
-//            }
-            turnToTarget(theta, maxTurnSpeed);
+        if(theta==0){
+            return;
         }
-//        else{
-//            stop();
-//            robotMoving = false;
-//        }
 
-        //telemetry.addLine("Done!");
+        theta = theta - currentPose.getHeading();
+        theta = Math.atan2(Math.sin(theta), Math.cos(theta));
+        theta = Math.toDegrees(theta);
+        turnToTarget(theta, maxTurnSpeed);
     }
 
     private double cap(double x, double limit){
