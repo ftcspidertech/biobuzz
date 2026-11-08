@@ -757,6 +757,7 @@ public class MecanumRobotController {
         PIDController xController = new PIDController(xKp, xKi, xKd);
         PIDController yController = new PIDController(yKp, yKi, yKd);
         PIDController headingController = new PIDController(thKp, thKi, thKd);
+        double Kx=1.0, Ky=1.0;
         double POSITION_TOLERANCE = 0.5; // inch
         double HEADING_TOLERANCE = Math.toRadians(1.0); // rad
         DrivetrainKinematics kinematics = new DrivetrainKinematics(frontLeftMotor, frontRightMotor,
@@ -773,6 +774,15 @@ public class MecanumRobotController {
         double averageWheelSpeed = stallSpeedThreshold + 1;
         double xError=tx-currentPose.getX(), yError=ty-currentPose.getY(), headingError=0.0-currentPose.getHeading();
         double robotForward, robotStrafe, turnPower;
+
+        // GoToX
+//        if (tx!=0 && ty==0.0 && theta==0) {
+//            Kx = maxDriveSpeed / (Math.abs(tx) * xKp);
+//        }
+        // GoToY
+//        if (tx==0 && ty!=0.0 && theta==0) {
+//            Ky = maxDriveSpeed / (Math.abs(ty) * yKp);
+//        }
 
         movingAverage.reset();
         robotMoving = true;
@@ -793,8 +803,8 @@ public class MecanumRobotController {
             }
 
             // Calculate motor power corrections
-            robotForward = xController.calculate(currentPose.getX());
-            robotStrafe  = yController.calculate(currentPose.getY());
+            robotForward = Kx*xController.calculate(currentPose.getX());
+            robotStrafe  = Ky*yController.calculate(currentPose.getY());
             turnPower = headingController.calculate(headingError);
 
             // Remove drift components and cap the speeds.
