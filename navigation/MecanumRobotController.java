@@ -54,9 +54,10 @@ public class MecanumRobotController {
     private double robotX=0, robotY=0, robotTheta=0;
     private final MovingAverage movingAverage = new MovingAverage(3);
     private final double accelDelay = 2500; // ms
-    public double xKp = 0.005, yKp=0.005, thKp=0.5;
-    public double xKd = 0.0, yKd=0.0, thKd=0.0004;
-    public double xKi = 0.0002, yKi=0.0002, thKi=0.004;
+    private double xKp = 0.005, yKp=0.005, thKp=0.5;
+    private double xKd = 0.0, yKd=0.0, thKd=0.0004;
+    private double xKi = 0.0002, yKi=0.0002, thKi=0.004;
+    private double Kx=1, Ky=1;
 
     public MecanumRobotController(HardwareMap hardwareMap, Telemetry tmetry) {
         initRobotController(hardwareMap,tmetry);
@@ -707,10 +708,6 @@ public class MecanumRobotController {
     }
 
     public void slideAndGo(double tx, double ty, double maxDrivePower){
-//        double angle = Math.toRadians(refTheta);
-//        double tx = refDistance*Math.cos(angle);
-//        double ty = refDistance*Math.sin(angle);
-
         if(ty<0){
             slideRight(maxDrivePower,Math.abs(ty));
         }else{
@@ -749,7 +746,17 @@ public class MecanumRobotController {
         goToTarget(tx,0,0,maxDrivePower,0);
     }
 
+    public void goToX(double tx, double maxDrivePower, double Kp) {
+        Kx = Kp;
+        goToTarget(tx,0,0,maxDrivePower,0);
+    }
+
     public void goToY(double ty, double maxDrivePower) {
+        goToTarget(0,ty,0,maxDrivePower,0);
+    }
+
+    public void goToY(double ty, double maxDrivePower, double Kp) {
+        Ky = Kp;
         goToTarget(0,ty,0,maxDrivePower,0);
     }
 
@@ -757,7 +764,6 @@ public class MecanumRobotController {
         PIDController xController = new PIDController(xKp, xKi, xKd);
         PIDController yController = new PIDController(yKp, yKi, yKd);
         PIDController headingController = new PIDController(thKp, thKi, thKd);
-        double Kx=1.0, Ky=1.0;
         double POSITION_TOLERANCE = 0.5; // inch
         double HEADING_TOLERANCE = Math.toRadians(1.0); // rad
         DrivetrainKinematics kinematics = new DrivetrainKinematics(frontLeftMotor, frontRightMotor,
@@ -778,11 +784,11 @@ public class MecanumRobotController {
         // GoToX
 //        if (tx!=0 && ty==0.0 && theta==0) {
 //            Kx = maxDriveSpeed / (Math.abs(tx) * xKp);
-//        }
+//        }else{Kx=1;}
         // GoToY
 //        if (tx==0 && ty!=0.0 && theta==0) {
 //            Ky = maxDriveSpeed / (Math.abs(ty) * yKp);
-//        }
+//        }else{Ky=1;}
 
         movingAverage.reset();
         robotMoving = true;
@@ -838,6 +844,9 @@ public class MecanumRobotController {
         robotMoving = false;
 
         updateRobotPose(currentPose);
+
+        Kx = 1;
+        Ky = 1;
 
         if(theta==0){
             return;
